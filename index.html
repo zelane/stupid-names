@@ -79,12 +79,13 @@
         <tr><td></td><td>3</td><td>element</td><td>sex</td></tr>
         <tr><td>Generation</td><td>1</td><td>birth year</td><td>birth year</td></tr>
         <tr><td></td><td>2</td><td>local area</td><td>birth year</td></tr>
-        <tr><td>Family</td><td>1–4</td><td colspan="2">birth area, alternating latitude and longitude</td></tr>
+        <tr><td>Family</td><td>1–2</td><td colspan="2">where in the region, alternating latitude and longitude</td></tr>
+        <tr><td></td><td>3–4</td><td colspan="2">region, shared as an ending by everyone born within a few hundred miles</td></tr>
       </tbody>
     </table>
     <div class="key" id="key"></div>
     <h3>Nicknames</h3>
-    <p><small>For anyone in a hurry, every name has a nickname that keeps all the same information in fewer syllables. Within each part of the name, syllables pair up: the second one loses its vowel, its consonant closes the first syllable, and the lost vowel survives as a tone on the vowel that's left. <i>No·vi·wa Sa·no Le·pe·la·po</i> becomes <i>Nòv·wa Sân Lép·lâp</i>. Full names, nicknames and mixtures of the two all read the same.</small></p>
+    <p><small>For anyone in a hurry, every name has a nickname that keeps all the same information in fewer syllables. Within each part of the name, syllables pair up: the second one loses its vowel, its consonant closes the first syllable, and the lost vowel survives as a tone on the vowel that's left. <i>No·vi·wa Sa·no La·po·le·pe</i> becomes <i>Nòv·wa Sân Lâp·lép</i>. A <i>w</i> that ends a syllable is written <i>u</i>, so <i>wa·we</i> shortens to <i>Wáu</i>. Full names, nicknames and mixtures of the two all read the same.</small></p>
     <p><small>Every letter is pronounced as its IPA symbol: <i>p t v s m n l w</i> as in English, <i>a e i o</i> as in Spanish or Italian. The 🔊 buttons use your browser's built-in voices, preferring a Spanish or Italian one because they spell these sounds the same way. Browser voices can't bend pitch within a syllable, so nickname tones are only approximated, one syllable at a time.</small></p>
     <table>
       <thead><tr><th>Lost vowel</th><th>Tone</th><th>Written</th></tr></thead>
@@ -170,7 +171,8 @@ function encode(x) {
   return {
     individual: INDIVIDUAL.map(([c, v]) => [x[c], toVowel(v, x[v])]),
     generation: [[yr[0], yr[1]], [la[4] * 4 + lo[4], yr[2]]],
-    family: [[la[0], lo[0]], [lo[1], la[1]], [la[2], lo[2]], [lo[3], la[3]]]
+    // Finer half first, regional half last, so a region shows up as a shared ending
+    family: [[la[2], lo[2]], [lo[3], la[3]], [la[0], lo[0]], [lo[1], la[1]]]
   };
 }
 
@@ -182,8 +184,8 @@ function decode(str) {
     throw new Error('Expected 3 syllables in the individual name, 2 in the generation name and 4 in the family name.');
   const x = {};
   INDIVIDUAL.forEach(([c, v], i) => { x[c] = ind[i][0]; x[v] = fromVowel(v, ind[i][1]); });
-  const la = [fam[0][0], fam[1][1], fam[2][0], fam[3][1], gen[1][0] >> 2];
-  const lo = [fam[0][1], fam[1][0], fam[2][1], fam[3][0], gen[1][0] & 3];
+  const la = [fam[2][0], fam[3][1], fam[0][0], fam[1][1], gen[1][0] >> 2];
+  const lo = [fam[2][1], fam[3][0], fam[0][1], fam[1][0], gen[1][0] & 3];
   x.la = fromDigits(fromGray(la, LAT_RADIX), LAT_RADIX);
   x.lo = fromDigits(fromGray(lo, LON_RADIX), LON_RADIX);
   x.year = EPOCH_YEAR + fromDigits(fromGray([gen[0][0], gen[0][1], gen[1][1]], YEAR_RADIX), YEAR_RADIX);
@@ -192,6 +194,8 @@ function decode(str) {
 
 // Nickname tones: combining marks standing in for a lost a / e / i / o
 const TONES = ['', '\u0301', '\u0300', '\u0302'];
+// A w closing a nickname syllable is written u (Mau, not Maw); u appears nowhere else
+const codaLetter = c => CONS[c] === 'w' ? 'u' : CONS[c];
 
 // Reads full-name syllables (CV) and nickname syllables (CV + tone + C) alike,
 // expanding each closed syllable back into the two it came from
@@ -206,8 +210,8 @@ function parseWord(word) {
     i += 2;
     let tone = TONES.indexOf(w[i]);
     if (tone > 0) i++; else tone = 0;
-    if (isCons(w[i]) && !isVow(w[i + 1])) {
-      out.push([c, v], [CONS.indexOf(w[i]), tone]);
+    if (w[i] === 'u' || (isCons(w[i]) && !isVow(w[i + 1]))) {
+      out.push([c, v], [CONS.indexOf(w[i] === 'u' ? 'w' : w[i]), tone]);
       i++;
     } else if (tone > 0) {
       throw new Error(`"${word}": a tone mark needs a closing consonant after its vowel.`);
@@ -234,7 +238,7 @@ function nickWord(sy) {
   let out = '';
   for (let i = 0; i < sy.length; i += 2) {
     const [c, v] = sy[i];
-    out += i + 1 < sy.length ? CONS[c] + VOW[v] + TONES[sy[i + 1][1]] + CONS[sy[i + 1][0]] : CONS[c] + VOW[v];
+    out += i + 1 < sy.length ? CONS[c] + VOW[v] + TONES[sy[i + 1][1]] + codaLetter(sy[i + 1][0]) : CONS[c] + VOW[v];
   }
   return (out[0].toUpperCase() + out.slice(1)).normalize('NFC');
 }
@@ -273,7 +277,7 @@ function pickVoice() {
 }
 function sayText(s, phonetic) {
   const v = phonetic ? VOW[s.v] : EN_VOWELS[s.v];
-  return CONS[s.c] + v + (s.coda === undefined ? '' : CONS[s.coda]);
+  return CONS[s.c] + v + (s.coda === undefined ? '' : phonetic ? codaLetter(s.coda) : CONS[s.coda]);
 }
 function speak(e, mode) {
   speechSynthesis.cancel();
