@@ -7,7 +7,7 @@
 <title>Birth Name Encoder</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Charis+SIL&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Charis+SIL&family=Noto+Sans+Georgian:wght@400;700&family=Noto+Sans+Armenian:wght@400;700&family=Noto+Sans+Ethiopic:wght@400;700&family=Noto+Sans+Devanagari:wght@400;700&display=swap">
 <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
 <style>
   .name { font-size:2rem; font-weight:700; margin:1rem 0 .75rem; word-break:break-word; }
@@ -24,6 +24,9 @@
   .nick b { color:var(--pico-color); }
   .ipa { color:var(--pico-muted-color); font-family:"Charis SIL","Doulos SIL","Gentium Plus","Noto Serif",serif; font-size:1.1rem; margin:-.6rem 0 .9rem; }
   .nick + .ipa { margin-top:-.8rem; }
+  :root { --pico-font-family: system-ui, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", Helvetica, Arial, "Noto Sans Georgian", "Noto Sans Armenian", "Noto Sans Ethiopic", "Noto Sans Devanagari", sans-serif; }
+  .script-pick { display:flex; align-items:center; gap:.6rem; margin:1.5rem 0 -.5rem; }
+  .script-pick select { width:auto; margin:0; }
   button.say { width:auto; display:inline-block; padding:.15rem .55rem; margin:0 0 0 .4rem; font-size:.8rem; vertical-align:middle; }
 </style>
 </head>
@@ -54,6 +57,7 @@
       </label>
     </div>
     <button id="geo">Use my current location</button>
+    <label class="script-pick">Write names in <select id="script"></select></label>
     <div id="result"></div>
   </article>
 
@@ -177,7 +181,7 @@ function encode(x) {
 }
 
 function decode(str) {
-  const words = str.trim().split(/\s+/);
+  const words = toLatin(str).trim().split(/\s+/);
   if (words.length !== 3) throw new Error('A name has three parts: individual name, generation name and family name.');
   const [ind, gen, fam] = words.map(parseWord);
   if (ind.length !== 3 || gen.length !== 2 || fam.length !== 4)
@@ -222,25 +226,74 @@ function parseWord(word) {
   return out;
 }
 
-const syl = ([c, v]) => CONS[c] + VOW[v];
+// ---------- Scripts ----------
+// Each script spells the same 8 consonants (p t v s m n l w) and 4 vowels (a e i o).
+// codaW is how a w closing a nickname syllable is written; tones are combining marks.
+const ETHIOPIC_ORDER = [3, 4, 2, 6];   // offsets of the a / e / i / o forms in each Ethiopic row
+const SCRIPTS = {
+  latin:    { label: 'Latin', cons: CONS, vow: VOW, codaW: 'u' },
+  georgian: { label: 'Georgian · ქართული', cons: ['ფ', 'თ', 'ვ', 'ს', 'მ', 'ნ', 'ლ', 'უ'], vow: ['ა', 'ე', 'ი', 'ო'], codaW: 'უ', caps: false },
+  greek:    { label: 'Greek · Ελληνικά', cons: ['π', 'τ', 'β', 'σ', 'μ', 'ν', 'λ', 'ϝ'], vow: ['α', 'ε', 'ι', 'ο'], codaW: 'υ',
+              tones: ['', '\u0301', '\u0300', '\u0342'] },
+  cyrillic: { label: 'Cyrillic · Кириллица', cons: ['п', 'т', 'в', 'с', 'м', 'н', 'л', 'ў'], vow: ['а', 'е', 'и', 'о'], codaW: 'ў' },
+  armenian: { label: 'Armenian · Հայերեն', cons: ['պ', 'տ', 'վ', 'ս', 'մ', 'ն', 'լ', 'ւ'], vow: ['ա', 'է', 'ի', 'օ'], codaW: 'ւ' },
+  // Vowels are signs on the consonant (a is the long-aa sign, so nothing relies on the
+  // inherent vowel); closing consonants take a virama and join the next one as a conjunct.
+  // v and w share a letter, so w gets a nukta. Tones are Devanagari's Vedic-style accents.
+  devanagari: { label: 'Devanagari · देवनागरी', cons: ['प', 'त', 'व', 'स', 'म', 'न', 'ल', 'व\u093C'],
+                vow: ['ा', 'े', 'ि', 'ो'], codaW: 'उ', halant: '्', caps: false,
+                tones: ['', '\u0954', '\u0953', '\u0951'] },
+  // Combining accents don't attach to Ethiopic syllables, so tones are spacing marks after them
+  ethiopic: { label: "Ge'ez · ግዕዝ", rows: [0x1350, 0x1270, 0x1268, 0x1230, 0x1218, 0x1290, 0x1208, 0x12C8], caps: false,
+              tones: ['', 'ˊ', 'ˋ', 'ˆ'] }
+};
+let script = SCRIPTS.latin;
+const sylIn = (S, c, v) => S.rows ? String.fromCodePoint(S.rows[c] + ETHIOPIC_ORDER[v]) : S.cons[c] + S.vow[v];
+const codaIn = (S, c) => S.rows ? String.fromCodePoint(S.rows[c] + 5) : c === 7 ? S.codaW : S.cons[c] + (S.halant || '');
+const toneIn = (S, t) => (S.tones || TONES)[t];
+const capitalise = t => script.caps === false ? t : t[0].toUpperCase() + t.slice(1);
+const finishWord = t => (script === SCRIPTS.greek ? t.replace(/σ$/, 'ς') : t).normalize('NFC');
+
+// Any script back to the Latin spelling the parser reads
+const TO_LATIN = new Map([['\u0342', '\u0302'], ['ˊ', '\u0301'], ['ˋ', '\u0300'], ['ˆ', '\u0302'], ['ς', 's'],
+  ['\u0954', '\u0301'], ['\u0953', '\u0300'], ['\u0951', '\u0302'], ['्', '']]);
+for (const S of Object.values(SCRIPTS)) {
+  if (S === SCRIPTS.latin) continue;
+  if (S.rows) {
+    S.rows.forEach((row, c) => {
+      ETHIOPIC_ORDER.forEach((off, v) => TO_LATIN.set(String.fromCodePoint(row + off), CONS[c] + VOW[v]));
+      TO_LATIN.set(String.fromCodePoint(row + 5), CONS[c]);
+    });
+  } else {
+    S.cons.forEach((ch, c) => { if ([...ch].length === 1) TO_LATIN.set(ch, c === 7 ? 'u' : CONS[c]); });
+    S.vow.forEach((ch, v) => TO_LATIN.set(ch, VOW[v]));
+    TO_LATIN.set(S.codaW, 'u');
+  }
+}
+function toLatin(str) {
+  // Two-character letters first: Cyrillic ў decomposes to у + breve, Devanagari w is व + nukta
+  const t = str.toLowerCase().normalize('NFD').replace(/у\u0306/g, 'u').replace(/व\u093C/g, 'w');
+  // Scripts that write w the same way in both positions: a u before a vowel starts a syllable
+  return [...t].map(ch => TO_LATIN.get(ch) ?? ch).join('').replace(/u(?=[aeio])/g, 'w');
+}
+
+const syl = ([c, v]) => CONS[c] + VOW[v];   // Latin, used for IPA and speech
 function word(sy, base) {
-  return sy.map((s, i) => {
-    let t = syl(s);
-    if (i === 0) t = t[0].toUpperCase() + t[1];
-    return base && syl(base[i]) !== syl(s) ? `<mark>${t}</mark>` : t;
+  return sy.map(([c, v], i) => {
+    let t = sylIn(script, c, v);
+    if (i === 0) t = capitalise(t);
+    return base && syl(base[i]) !== syl([c, v]) ? `<mark>${t}</mark>` : t;
   }).join('');
 }
 const PARTS = ['individual', 'generation', 'family'];
 const nameHTML = (e, base) => PARTS.map(k => word(e[k], base && base[k])).join(' ');
+const sylChips = sy => sy.map(([c, v]) => sylIn(script, c, v)).join('-');
 
 // Pair up syllables; the second of each pair keeps only its consonant and its vowel becomes a tone
 function nickWord(sy) {
-  let out = '';
-  for (let i = 0; i < sy.length; i += 2) {
-    const [c, v] = sy[i];
-    out += i + 1 < sy.length ? CONS[c] + VOW[v] + TONES[sy[i + 1][1]] + codaLetter(sy[i + 1][0]) : CONS[c] + VOW[v];
-  }
-  return (out[0].toUpperCase() + out.slice(1)).normalize('NFC');
+  const out = nickSyllables(sy).map(s => sylIn(script, s.c, s.v) +
+    (s.coda === undefined ? '' : toneIn(script, s.tone) + codaIn(script, s.coda))).join('');
+  return finishWord(capitalise(out));
 }
 const nickname = e => PARTS.map(k => nickWord(e[k])).join(' ');
 
@@ -344,6 +397,24 @@ function readInputs() {
   return { ...x, la: latIndex(lat), lo: lonIndex(lon), lat };
 }
 
+// ---------- Script picker ----------
+for (const [id, S] of Object.entries(SCRIPTS)) $('script').add(new Option(S.label, id));
+try { const saved = localStorage.getItem('script'); if (SCRIPTS[saved]) script = SCRIPTS[saved]; } catch (e) {}
+$('script').value = Object.keys(SCRIPTS).find(id => SCRIPTS[id] === script);
+$('script').addEventListener('change', () => {
+  // Rewrite whatever is in the reader into the new script, keeping full name vs nickname
+  let reading = null;
+  try {
+    const e = encode(decode($('nameIn').value));
+    reading = { e, nick: $('nameIn').value.trim().normalize('NFC') === nickname(e) };
+  } catch (err) {}
+  script = SCRIPTS[$('script').value];
+  try { localStorage.setItem('script', $('script').value); } catch (e) {}
+  if (reading) $('nameIn').value = reading.nick ? nickname(reading.e) : nameHTML(reading.e);
+  renderEncode();
+  renderDecode();
+});
+
 // ---------- Random starting values ----------
 // Cities to scatter random birthplaces around, so the pin lands on land
 const CITIES = [
@@ -436,7 +507,7 @@ function renderEncode() {
     const rows = variants.map(([label, v]) =>
       `<div><span class="k">${label}:</span> ${nameHTML(encode(v), e)}</div>`
     ).join('');
-    const ind = e.individual.map(syl);
+    const ind = e.individual.map(s => sylIn(script, ...s));
     const nick = nickname(e);
     res.innerHTML = `
       <div class="name">${plain}${sayBtn(plain, 'full')}</div>
@@ -447,8 +518,8 @@ function renderEncode() {
         <div class="part"><b>${ind[0]}</b>colour + chronotype</div>
         <div class="part"><b>${ind[1]}</b>alignment + spice</div>
         <div class="part"><b>${ind[2]}</b>element + sex</div>
-        <div class="part"><b>${e.generation.map(syl).join('-')}</b>birth year + local area</div>
-        <div class="part"><b>${e.family.map(syl).join('-')}</b>family area</div>
+        <div class="part"><b>${sylChips(e.generation)}</b>birth year + local area</div>
+        <div class="part"><b>${sylChips(e.family)}</b>family area</div>
       </div>
       <div class="neigh">${rows}</div>
       <div role="group">
