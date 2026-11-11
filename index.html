@@ -14,50 +14,32 @@
   .part { background:var(--pico-code-background-color); border-radius:var(--pico-border-radius); padding:.4rem .7rem; font-size:.8rem; color:var(--pico-muted-color); }
   .part b { display:block; color:var(--pico-color); font-size:1rem; }
   .neigh { margin:1rem 0; }
-  .neigh .k { display:inline-block; min-width:12rem; color:var(--pico-muted-color); }
+  .neigh .k { display:inline-block; min-width:14rem; color:var(--pico-muted-color); }
   .err { color:var(--pico-del-color); }
-  td small { color:var(--pico-muted-color); }
   .map { height:320px; border-radius:var(--pico-border-radius); overflow:hidden; margin-bottom:.5rem; }
-  .map-hint { display:block; color:var(--pico-muted-color); margin-bottom:1rem; }
+  .hint { display:block; color:var(--pico-muted-color); margin-bottom:1rem; }
+  .key p { margin-bottom:.4rem; }
 </style>
 </head>
 <body>
 <main class="container">
   <hgroup>
     <h1>Birth Name Encoder</h1>
-    <p>Every name encodes sex, favourite colour, birth year and birthplace. Similar people get similar names.</p>
+    <p>Every name has three parts: an individual name for who you are, a generation name for when and roughly where you were born, and a family name shared by everyone born in the same area. Similar people get similar names.</p>
   </hgroup>
 
   <article>
     <h2>Make a name</h2>
+    <h3>Individual name</h3>
+    <div class="grid" id="fieldsA"></div>
+    <div class="grid" id="fieldsB"></div>
+    <h3>Generation and family name</h3>
+    <div id="pickMap" class="map"></div>
+    <small class="hint">Click the map or drag the pin to set the birthplace.</small>
     <div class="grid">
-      <label>Sex
-        <select id="sex">
-          <option value="0">Unspecified</option>
-          <option value="1">Female</option>
-          <option value="2">Male</option>
-          <option value="3">Other</option>
-        </select>
-      </label>
-      <label>Favourite colour
-        <select id="colour">
-          <option value="0">Red</option>
-          <option value="1">Orange</option>
-          <option value="2">Yellow</option>
-          <option value="3">Green</option>
-          <option value="4">Teal</option>
-          <option value="5">Blue</option>
-          <option value="6">Purple</option>
-          <option value="7">Pink</option>
-        </select>
-      </label>
       <label>Birth year
         <input type="number" id="year" min="1930" step="1">
       </label>
-    </div>
-    <div id="pickMap" class="map"></div>
-    <small class="map-hint">Click the map or drag the pin to set the birthplace.</small>
-    <div class="grid">
       <label>Birthplace latitude
         <input type="number" id="lat" step="any">
       </label>
@@ -74,79 +56,120 @@
     <label>Name
       <input type="text" id="nameIn" autocomplete="off" spellcheck="false">
     </label>
+    <small class="hint">Starts with a sibling of the person above: a different individual name, the same family name, and a generation name that only differs by birth year.</small>
     <div id="decoded"></div>
     <div id="showMap" class="map"></div>
+    <small class="hint">The large box is the family area. The small box is the generation name's few-mile square.</small>
   </article>
 
   <article>
-    <h2>Syllables</h2>
-    <div id="table"></div>
-    <p><small>Each syllable stands for a number from 0 to 31. Neighbouring numbers differ by one sound, and each part of the name counts in reflected (Gray) order, so neighbouring values change only one syllable. Colours run round the colour wheel, so similar colours get similar first syllables.</small></p>
+    <h2>How to read the syllables</h2>
+    <p><small>Every syllable is a consonant and a vowel. The consonant (p t k s m n l w) is a number from 0 to 7 and the vowel (a e i o) is a number from 0 to 3, so each trait owns one sound and changing a trait changes only that sound.</small></p>
+    <table>
+      <thead><tr><th>Part</th><th>Syllable</th><th>Consonant</th><th>Vowel</th></tr></thead>
+      <tbody>
+        <tr><td>Individual</td><td>1</td><td>favourite colour</td><td>chronotype</td></tr>
+        <tr><td></td><td>2</td><td>alignment</td><td>spice tolerance</td></tr>
+        <tr><td></td><td>3</td><td>element</td><td>sex</td></tr>
+        <tr><td>Generation</td><td>1</td><td>birth year</td><td>birth year</td></tr>
+        <tr><td></td><td>2</td><td>local area</td><td>birth year</td></tr>
+        <tr><td>Family</td><td>1–4</td><td colspan="2">birth area, alternating latitude and longitude</td></tr>
+      </tbody>
+    </table>
+    <div class="key" id="key"></div>
+    <p><small>Year and location count in reflected (Gray) order, so being born a year later, or one grid square over, changes a single sound. Family areas are about 12 miles north to south and 24 miles east to west at the equator, narrowing towards the poles (about 15 miles at London's latitude). The generation name narrows that to a square about 6 miles tall.</small></p>
   </article>
 </main>
 
 <script>
 const CONS = ['p','t','k','s','m','n','l','w'];
 const VOW = ['a','e','i','o'];
-const SEXES = ['Unspecified','Female','Male','Other'];
-const COLOURS = ['Red','Orange','Yellow','Green','Teal','Blue','Purple','Pink'];
 const EPOCH_YEAR = 1930;
 const MAX_YEAR = new Date().getFullYear();
 const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
 const $ = id => document.getElementById(id);
 
-// Snake-ordered syllable table: even rows a-e-i-o, odd rows o-i-e-a
-function syl(n) {
-  const c = n >> 2, r = n & 3;
-  return CONS[c] + (c % 2 === 0 ? VOW[r] : VOW[3 - r]);
-}
-const SYL_TO_VAL = {};
-for (let n = 0; n < 32; n++) SYL_TO_VAL[syl(n)] = n;
+// Traits in the individual name. Consonant fields have 8 values, vowel fields 4.
+// `vowels` remaps a field's values onto a e i o when the default order isn't wanted.
+const FIELDS = {
+  sex:     { label: 'Sex', values: ['Unspecified', 'Female', 'Male', 'Other'], vowels: [1, 0, 3, 2] },
+  colour:  { label: 'Favourite colour', values: ['Red', 'Orange', 'Yellow', 'Green', 'Teal', 'Blue', 'Purple', 'Pink'] },
+  align:   { label: 'Alignment', values: ['Lawful good', 'Neutral good', 'Chaotic good', 'Chaotic neutral',
+                                          'Chaotic evil', 'Neutral evil', 'Lawful evil', 'Lawful neutral'] },
+  chrono:  { label: 'Chronotype', values: ['Early bird', 'Morning', 'Evening', 'Night owl'] },
+  spice:   { label: 'Spice tolerance', values: ['None', 'Mild', 'Hot', 'Inferno'] },
+  element: { label: 'Element', values: ['Fire', 'Lightning', 'Air', 'Water', 'Ice', 'Earth', 'Metal', 'Void'] }
+};
+// [consonant field, vowel field] for each individual-name syllable; sex ends the name
+const INDIVIDUAL = [['colour', 'chrono'], ['align', 'spice'], ['element', 'sex']];
+const toVowel = (f, v) => FIELDS[f].vowels ? FIELDS[f].vowels[v] : v;
+const fromVowel = (f, i) => FIELDS[f].vowels ? FIELDS[f].vowels.indexOf(i) : i;
 
-// Reflected base-32 Gray code: a digit is reversed when the digit before it is odd
-function toGray(d, startOdd) {
-  return d.map((x, i) => {
-    const odd = i === 0 ? startOdd : d[i - 1] % 2 === 1;
-    return odd ? 31 - x : x;
-  });
-}
-function fromGray(g, startOdd) {
+// Digit layouts. Latitude and longitude alternate between consonant (8) and vowel (4)
+// slots across the family name, and their last digits sit in the generation name.
+const LAT_RADIX = [8, 4, 8, 4, 2];   // 11 bits, ~6 mile rows
+const LON_RADIX = [4, 8, 4, 8, 4];   // 12 bits
+const YEAR_RADIX = [8, 4, 4];        // 7 bits, 1930-2057
+const LAT_CELLS = 2048, LON_CELLS = 4096;
+
+function digitsOf(n, radix) {
   const d = [];
-  g.forEach((x, i) => {
-    const odd = i === 0 ? startOdd : d[i - 1] % 2 === 1;
-    d.push(odd ? 31 - x : x);
-  });
+  for (let i = radix.length - 1; i >= 0; i--) { d[i] = n % radix[i]; n = Math.floor(n / radix[i]); }
   return d;
 }
-const digits2 = n => [(n >> 5) & 31, n & 31];
-const fromDigits2 = d => d[0] * 32 + d[1];
-const digits3 = n => [(n >> 10) & 31, (n >> 5) & 31, n & 31];
-const fromDigits3 = d => d[0] * 1024 + d[1] * 32 + d[2];
+const fromDigits = (d, radix) => d.reduce((n, x, i) => n * radix[i] + x, 0);
 
-// 15 bits each for latitude and longitude
-const latIndex = lat => Math.min(32767, Math.max(0, Math.floor((lat + 90) / 180 * 32768)));
-function lonIndex(lon) {
-  const x = ((lon + 180) % 360 + 360) % 360;
-  return Math.floor(x / 360 * 32768) % 32768;
+// Reflected mixed-radix Gray code: a digit is reversed when the number formed by
+// the digits before it is odd, so counting up changes exactly one digit at a time.
+function toGray(d, radix) {
+  let odd = false;
+  return d.map((x, i) => {
+    const g = odd ? radix[i] - 1 - x : x;
+    odd = (odd * radix[i] + x) % 2 === 1;
+    return g;
+  });
+}
+function fromGray(g, radix) {
+  let odd = false;
+  return g.map((x, i) => {
+    const d = odd ? radix[i] - 1 - x : x;
+    odd = (odd * radix[i] + d) % 2 === 1;
+    return d;
+  });
 }
 
-function encode(sex, colour, year, la, lo) {
+const latIndex = lat => Math.min(LAT_CELLS - 1, Math.max(0, Math.floor((lat + 90) / 180 * LAT_CELLS)));
+function lonIndex(lon) {
+  const x = ((lon + 180) % 360 + 360) % 360;
+  return Math.floor(x / 360 * LON_CELLS) % LON_CELLS;
+}
+
+// A word is a list of [consonant, vowel] index pairs
+function encode(x) {
+  const la = toGray(digitsOf(x.la, LAT_RADIX), LAT_RADIX);
+  const lo = toGray(digitsOf(x.lo, LON_RADIX), LON_RADIX);
+  const yr = toGray(digitsOf(x.year - EPOCH_YEAR, YEAR_RADIX), YEAR_RADIX);
   return {
-    first: [sex * 8 + colour, ...toGray(digits2(year - EPOCH_YEAR), false)],
-    middle: toGray(digits3(lo), false),     // longitude
-    surname: toGray(digits3(la), false)     // latitude
+    individual: INDIVIDUAL.map(([c, v]) => [x[c], toVowel(v, x[v])]),
+    generation: [[yr[0], yr[1]], [la[4] * 4 + lo[4], yr[2]]],
+    family: [[la[0], lo[0]], [lo[1], la[1]], [la[2], lo[2]], [lo[3], la[3]]]
   };
 }
 
-function word(vals, base) {
-  return vals.map((v, i) => {
-    let t = syl(v);
-    if (i === 0) t = t[0].toUpperCase() + t[1];
-    return base && base[i] !== v ? `<mark>${t}</mark>` : t;
-  }).join('');
-}
-function nameHTML(e, base) {
-  return ['first', 'middle', 'surname'].map(k => word(e[k], base && base[k])).join(' ');
+function decode(str) {
+  const words = str.trim().split(/\s+/);
+  if (words.length !== 3) throw new Error('A name has three parts: individual name, generation name and family name.');
+  const [ind, gen, fam] = words.map(parseWord);
+  if (ind.length !== 3 || gen.length !== 2 || fam.length !== 4)
+    throw new Error('Expected 3 syllables in the individual name, 2 in the generation name and 4 in the family name.');
+  const x = {};
+  INDIVIDUAL.forEach(([c, v], i) => { x[c] = ind[i][0]; x[v] = fromVowel(v, ind[i][1]); });
+  const la = [fam[0][0], fam[1][1], fam[2][0], fam[3][1], gen[1][0] >> 2];
+  const lo = [fam[0][1], fam[1][0], fam[2][1], fam[3][0], gen[1][0] & 3];
+  x.la = fromDigits(fromGray(la, LAT_RADIX), LAT_RADIX);
+  x.lo = fromDigits(fromGray(lo, LON_RADIX), LON_RADIX);
+  x.year = EPOCH_YEAR + fromDigits(fromGray([gen[0][0], gen[0][1], gen[1][1]], YEAR_RADIX), YEAR_RADIX);
+  return x;
 }
 
 function parseWord(w) {
@@ -154,27 +177,30 @@ function parseWord(w) {
   if (w.length % 2) throw new Error(`"${w}" has an odd number of letters; every syllable is two letters.`);
   const out = [];
   for (let i = 0; i < w.length; i += 2) {
-    const s = w.slice(i, i + 2);
-    if (!(s in SYL_TO_VAL)) throw new Error(`"${s}" isn't one of the 32 syllables.`);
-    out.push(SYL_TO_VAL[s]);
+    const c = CONS.indexOf(w[i]), v = VOW.indexOf(w[i + 1]);
+    if (c < 0 || v < 0) throw new Error(`"${w.slice(i, i + 2)}" isn't a valid syllable: use one of ${CONS.join(' ')} then one of ${VOW.join(' ')}.`);
+    out.push([c, v]);
   }
   return out;
 }
 
-function decode(str) {
-  const words = str.trim().split(/\s+/);
-  if (words.length !== 3) throw new Error('A name has three parts: first name, middle name and surname.');
-  const [f, m, s] = words.map(parseWord);
-  if (f.length !== 3 || m.length !== 3 || s.length !== 3)
-    throw new Error('Expected 3 syllables in each part of the name.');
-  return {
-    sex: f[0] >> 3,
-    colour: f[0] & 7,
-    year: EPOCH_YEAR + fromDigits2(fromGray(f.slice(1), false)),
-    lo: fromDigits3(fromGray(m, false)),
-    la: fromDigits3(fromGray(s, false))
-  };
+const syl = ([c, v]) => CONS[c] + VOW[v];
+function word(sy, base) {
+  return sy.map((s, i) => {
+    let t = syl(s);
+    if (i === 0) t = t[0].toUpperCase() + t[1];
+    return base && syl(base[i]) !== syl(s) ? `<mark>${t}</mark>` : t;
+  }).join('');
 }
+const PARTS = ['individual', 'generation', 'family'];
+const nameHTML = (e, base) => PARTS.map(k => word(e[k], base && base[k])).join(' ');
+
+// Grid squares as [west, south, east, north]
+function cellBox(la, lo, latCells, lonCells) {
+  return [lo / lonCells * 360 - 180, la / latCells * 180 - 90, (lo + 1) / lonCells * 360 - 180, (la + 1) / latCells * 180 - 90];
+}
+const familyBox = x => cellBox(x.la >> 1, x.lo >> 2, LAT_CELLS / 2, LON_CELLS / 4);
+const localBox = x => cellBox(x.la, x.lo, LAT_CELLS, LON_CELLS);
 
 function showError(el, msg) {
   el.innerHTML = '';
@@ -184,15 +210,29 @@ function showError(el, msg) {
   el.appendChild(p);
 }
 
+// ---------- Form ----------
+function buildSelect(id) {
+  const label = document.createElement('label');
+  label.textContent = FIELDS[id].label;
+  const sel = document.createElement('select');
+  sel.id = id;
+  FIELDS[id].values.forEach((name, i) => sel.add(new Option(name, i)));
+  label.appendChild(sel);
+  return label;
+}
+['sex', 'colour', 'align'].forEach(id => $('fieldsA').appendChild(buildSelect(id)));
+['chrono', 'spice', 'element'].forEach(id => $('fieldsB').appendChild(buildSelect(id)));
+
 function readInputs() {
-  const sex = +$('sex').value, colour = +$('colour').value;
-  const year = +$('year').value;
-  if (!Number.isInteger(year) || year < EPOCH_YEAR || year > MAX_YEAR)
+  const x = {};
+  for (const id in FIELDS) x[id] = +$(id).value;
+  x.year = +$('year').value;
+  if (!Number.isInteger(x.year) || x.year < EPOCH_YEAR || x.year > MAX_YEAR)
     throw new Error(`Birth year must be between ${EPOCH_YEAR} and ${MAX_YEAR}.`);
   const lat = parseFloat($('lat').value), lon = parseFloat($('lon').value);
   if (!isFinite(lat) || lat < -90 || lat > 90) throw new Error('Latitude must be between -90 and 90.');
   if (!isFinite(lon)) throw new Error('Enter a longitude.');
-  return { sex, colour, year, la: latIndex(lat), lo: lonIndex(lon), lat };
+  return { ...x, la: latIndex(lat), lo: lonIndex(lon), lat };
 }
 
 // ---------- Random starting values ----------
@@ -208,23 +248,26 @@ const CITIES = [
 const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
 function randomPerson() {
   const [cLat, cLon] = CITIES[randInt(0, CITIES.length - 1)];
-  return {
-    sex: randInt(0, 3),
-    colour: randInt(0, 7),
+  const x = {
     year: randInt(EPOCH_YEAR, MAX_YEAR),
     lat: Math.max(-90, Math.min(90, cLat + (Math.random() - 0.5) * 0.4)),
     lon: cLon + (Math.random() - 0.5) * 0.4
   };
+  for (const id in FIELDS) x[id] = randInt(0, FIELDS[id].values.length - 1);
+  return x;
 }
 const start = randomPerson();
-$('sex').value = start.sex;
-$('colour').value = start.colour;
+for (const id in FIELDS) $(id).value = start[id];
 $('year').value = start.year;
 $('lat').value = start.lat.toFixed(5);
 $('lon').value = start.lon.toFixed(5);
 
-const sample = randomPerson();
-$('nameIn').value = nameHTML(encode(sample.sex, sample.colour, sample.year, latIndex(sample.lat), lonIndex(sample.lon)));
+// A sibling: born in the same place a few years apart, with their own traits
+const gap = randInt(1, 6) * (Math.random() < 0.5 ? -1 : 1);
+let sibYear = start.year + gap;
+if (sibYear < EPOCH_YEAR || sibYear > MAX_YEAR) sibYear = start.year - gap;
+const sibling = { ...randomPerson(), lat: start.lat, lon: start.lon, year: sibYear };
+$('nameIn').value = nameHTML(encode({ ...sibling, la: latIndex(sibling.lat), lo: lonIndex(sibling.lon) }));
 
 // ---------- Maps ----------
 const mapOpts = { style: MAP_STYLE, attributionControl: { compact: false } };
@@ -242,12 +285,26 @@ function setPick(lon, lat, fly) {
 pickMap.on('click', e => { const p = e.lngLat.wrap(); setPick(p.lng, p.lat, false); });
 pickMarker.on('dragend', () => { const p = pickMarker.getLngLat().wrap(); setPick(p.lng, p.lat, false); });
 
-const showMap = new maplibregl.Map({ ...mapOpts, container: 'showMap', center: [sample.lon, sample.lat], zoom: 13 });
-const showMarker = new maplibregl.Marker({ color: '#c4512d' }).setLngLat([sample.lon, sample.lat]).addTo(showMap);
+const showMap = new maplibregl.Map({ ...mapOpts, container: 'showMap', center: [sibling.lon, sibling.lat], zoom: 8 });
+const showReady = new Promise(resolve => showMap.on('load', () => {
+  const empty = { type: 'FeatureCollection', features: [] };
+  showMap.addSource('family', { type: 'geojson', data: empty });
+  showMap.addSource('local', { type: 'geojson', data: empty });
+  showMap.addLayer({ id: 'family-fill', type: 'fill', source: 'family', paint: { 'fill-color': '#c4512d', 'fill-opacity': 0.08 } });
+  showMap.addLayer({ id: 'family-line', type: 'line', source: 'family', paint: { 'line-color': '#c4512d', 'line-width': 2 } });
+  showMap.addLayer({ id: 'local-fill', type: 'fill', source: 'local', paint: { 'fill-color': '#c4512d', 'fill-opacity': 0.3 } });
+  showMap.addLayer({ id: 'local-line', type: 'line', source: 'local', paint: { 'line-color': '#c4512d', 'line-width': 1.5 } });
+  resolve();
+}));
+const boxGeo = ([w, s, e, n]) => ({ type: 'Polygon', coordinates: [[[w, s], [e, s], [e, n], [w, n], [w, s]]] });
 
-function showPlace(lat, lon) {
-  showMarker.setLngLat([lon, lat]);
-  showMap.flyTo({ center: [lon, lat], zoom: 13 });
+function showPlace(x) {
+  showReady.then(() => {
+    const fam = familyBox(x);
+    showMap.getSource('family').setData(boxGeo(fam));
+    showMap.getSource('local').setData(boxGeo(localBox(x)));
+    showMap.fitBounds([[fam[0], fam[1]], [fam[2], fam[3]]], { padding: 30 });
+  });
 }
 
 // ---------- Rendering ----------
@@ -255,26 +312,30 @@ function renderEncode() {
   const res = $('result');
   try {
     const x = readInputs();
-    const e = encode(x.sex, x.colour, x.year, x.la, x.lo);
+    const e = encode(x);
     const plain = nameHTML(e);
-    const eastM = Math.round(1221.6 * Math.cos(x.lat * Math.PI / 180));
+    const cosLat = Math.cos(x.lat * Math.PI / 180);
     const variants = [
+      ['A sibling born 3 years later', { ...x, year: x.year + 3, colour: (x.colour + 3) % 8, align: (x.align + 5) % 8, element: (x.element + 2) % 8 }],
       ['Born a year earlier', { ...x, year: x.year - 1 }],
-      ['Born a year later', { ...x, year: x.year + 1 }],
       ['Likes the next colour along', { ...x, colour: (x.colour + 1) % 8 }],
-      ['Born ~610 m further north', { ...x, la: Math.min(32767, x.la + 1) }],
-      [`Born ~${eastM} m further east`, { ...x, lo: (x.lo + 1) % 32768 }]
+      ['One step more chaotic', { ...x, align: (x.align + 1) % 8 }],
+      ['Born ~6 miles further north', { ...x, la: Math.min(LAT_CELLS - 1, x.la + 1) }],
+      [`Born ~${(6.1 * cosLat).toFixed(1)} miles further east`, { ...x, lo: (x.lo + 1) % LON_CELLS }],
+      [`Born ~${(24.3 * cosLat).toFixed(0)} miles further east`, { ...x, lo: (x.lo + 4) % LON_CELLS }]
     ].filter(([, v]) => v.year >= EPOCH_YEAR && v.year <= MAX_YEAR);
     const rows = variants.map(([label, v]) =>
-      `<div><span class="k">${label}:</span> ${nameHTML(encode(v.sex, v.colour, v.year, v.la, v.lo), e)}</div>`
+      `<div><span class="k">${label}:</span> ${nameHTML(encode(v), e)}</div>`
     ).join('');
+    const ind = e.individual.map(syl);
     res.innerHTML = `
       <div class="name">${plain}</div>
       <div class="parts">
-        <div class="part"><b>${syl(e.first[0])}</b>sex + colour</div>
-        <div class="part"><b>${e.first.slice(1).map(syl).join('-')}</b>birth year</div>
-        <div class="part"><b>${e.middle.map(syl).join('-')}</b>longitude</div>
-        <div class="part"><b>${e.surname.map(syl).join('-')}</b>latitude</div>
+        <div class="part"><b>${ind[0]}</b>colour + chronotype</div>
+        <div class="part"><b>${ind[1]}</b>alignment + spice</div>
+        <div class="part"><b>${ind[2]}</b>element + sex</div>
+        <div class="part"><b>${e.generation.map(syl).join('-')}</b>birth year + local area</div>
+        <div class="part"><b>${e.family.map(syl).join('-')}</b>family area</div>
       </div>
       <div class="neigh">${rows}</div>
       <button class="outline" id="toRead">Read this name ↓</button>`;
@@ -293,35 +354,28 @@ function renderDecode() {
   if (!$('nameIn').value.trim()) { out.innerHTML = ''; return; }
   try {
     const r = decode($('nameIn').value);
-    const lat = (r.la + 0.5) / 32768 * 180 - 90;
-    const lon = (r.lo + 0.5) / 32768 * 360 - 180;
-    out.innerHTML = `
-      <p><b>Sex:</b> ${SEXES[r.sex]}</p>
-      <p><b>Favourite colour:</b> ${COLOURS[r.colour]}</p>
+    const lat = (r.la + 0.5) / LAT_CELLS * 180 - 90;
+    const lon = (r.lo + 0.5) / LON_CELLS * 360 - 180;
+    out.innerHTML = Object.keys(FIELDS).map(id =>
+      `<p><b>${FIELDS[id].label}:</b> ${FIELDS[id].values[r[id]]}</p>`).join('') + `
       <p><b>Born:</b> ${r.year}</p>
-      <p><b>Birthplace:</b> ${lat.toFixed(4)}, ${lon.toFixed(4)} (to within about a kilometre)</p>`;
-    showPlace(lat, lon);
+      <p><b>Birthplace:</b> around ${lat.toFixed(2)}, ${lon.toFixed(2)} (to within a few miles)</p>`;
+    showPlace(r);
   } catch (err) {
     showError(out, err.message);
   }
 }
 
-function renderTable() {
-  let h = '<table>';
-  for (let c = 0; c < 8; c++) {
-    h += `<tr><td class="h">${CONS[c]}</td>`;
-    for (let r = 0; r < 4; r++) {
-      const n = c * 4 + r;
-      h += `<td>${syl(n)} <small>${n}</small></td>`;
-    }
-    h += '</tr>';
-  }
-  $('table').innerHTML = h + '</table>';
+function renderKey() {
+  const sound = (id, i) => INDIVIDUAL.some(([c]) => c === id) ? CONS[i] : VOW[toVowel(id, i)];
+  $('key').innerHTML = Object.keys(FIELDS).map(id =>
+    `<p><small><b>${FIELDS[id].label}:</b> ${FIELDS[id].values.map((v, i) => `<i>${sound(id, i)}</i> ${v}`).join(' · ')}</small></p>`
+  ).join('');
 }
 
 // ---------- Wiring ----------
 $('year').max = MAX_YEAR;
-['sex', 'colour', 'year', 'lat', 'lon'].forEach(id => $(id).addEventListener('input', renderEncode));
+[...Object.keys(FIELDS), 'year', 'lat', 'lon'].forEach(id => $(id).addEventListener('input', renderEncode));
 ['lat', 'lon'].forEach(id => $(id).addEventListener('change', () => {
   const lat = parseFloat($('lat').value), lon = parseFloat($('lon').value);
   if (isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90) {
@@ -339,7 +393,7 @@ $('geo').onclick = () => {
   );
 };
 
-renderTable();
+renderKey();
 renderEncode();
 renderDecode();
 </script>
