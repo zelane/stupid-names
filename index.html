@@ -7,6 +7,7 @@
 <title>Birth Name Encoder</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Charis+SIL&display=swap">
 <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
 <style>
   .name { font-size:2rem; font-weight:700; margin:1rem 0 .75rem; word-break:break-word; }
@@ -19,6 +20,11 @@
   .map { height:320px; border-radius:var(--pico-border-radius); overflow:hidden; margin-bottom:.5rem; }
   .hint { display:block; color:var(--pico-muted-color); margin-bottom:1rem; }
   .key p { margin-bottom:.4rem; }
+  .nick { font-size:1.2rem; margin:-.25rem 0 .9rem; color:var(--pico-muted-color); }
+  .nick b { color:var(--pico-color); }
+  .ipa { color:var(--pico-muted-color); font-family:"Charis SIL","Doulos SIL","Gentium Plus","Noto Serif",serif; font-size:1.1rem; margin:-.6rem 0 .9rem; }
+  .nick + .ipa { margin-top:-.8rem; }
+  button.say { width:auto; display:inline-block; padding:.15rem .55rem; margin:0 0 0 .4rem; font-size:.8rem; vertical-align:middle; }
 </style>
 </head>
 <body>
@@ -64,7 +70,7 @@
 
   <article>
     <h2>How to read the syllables</h2>
-    <p><small>Every syllable is a consonant and a vowel. The consonant (p t k s m n l w) is a number from 0 to 7 and the vowel (a e i o) is a number from 0 to 3, so each trait owns one sound and changing a trait changes only that sound.</small></p>
+    <p><small>Every syllable is a consonant and a vowel. The consonant (p t v s m n l w) is a number from 0 to 7 and the vowel (a e i o) is a number from 0 to 3, so each trait owns one sound and changing a trait changes only that sound.</small></p>
     <table>
       <thead><tr><th>Part</th><th>Syllable</th><th>Consonant</th><th>Vowel</th></tr></thead>
       <tbody>
@@ -77,12 +83,24 @@
       </tbody>
     </table>
     <div class="key" id="key"></div>
+    <h3>Nicknames</h3>
+    <p><small>For anyone in a hurry, every name has a nickname that keeps all the same information in fewer syllables. Within each part of the name, syllables pair up: the second one loses its vowel, its consonant closes the first syllable, and the lost vowel survives as a tone on the vowel that's left. <i>No·vi·wa Sa·no Le·pe·la·po</i> becomes <i>Nòv·wa Sân Lép·lâp</i>. Full names, nicknames and mixtures of the two all read the same.</small></p>
+    <p><small>Every letter is pronounced as its IPA symbol: <i>p t v s m n l w</i> as in English, <i>a e i o</i> as in Spanish or Italian. The 🔊 buttons use your browser's built-in voices, preferring a Spanish or Italian one because they spell these sounds the same way. Browser voices can't bend pitch within a syllable, so nickname tones are only approximated, one syllable at a time.</small></p>
+    <table>
+      <thead><tr><th>Lost vowel</th><th>Tone</th><th>Written</th></tr></thead>
+      <tbody>
+        <tr><td>a</td><td>level</td><td>no mark: <i>pav</i></td></tr>
+        <tr><td>e</td><td>rising</td><td>acute: <i>páv</i></td></tr>
+        <tr><td>i</td><td>falling</td><td>grave: <i>pàv</i></td></tr>
+        <tr><td>o</td><td>rise then fall</td><td>circumflex: <i>pâv</i></td></tr>
+      </tbody>
+    </table>
     <p><small>Year and location count in reflected (Gray) order, so being born a year later, or one grid square over, changes a single sound. Family areas are about 12 miles north to south and 24 miles east to west at the equator, narrowing towards the poles (about 15 miles at London's latitude). The generation name narrows that to a square about 6 miles tall.</small></p>
   </article>
 </main>
 
 <script>
-const CONS = ['p','t','k','s','m','n','l','w'];
+const CONS = ['p','t','v','s','m','n','l','w'];
 const VOW = ['a','e','i','o'];
 const EPOCH_YEAR = 1930;
 const MAX_YEAR = new Date().getFullYear();
@@ -172,14 +190,30 @@ function decode(str) {
   return x;
 }
 
-function parseWord(w) {
-  w = w.toLowerCase().replace(/[^a-z]/g, '');
-  if (w.length % 2) throw new Error(`"${w}" has an odd number of letters; every syllable is two letters.`);
+// Nickname tones: combining marks standing in for a lost a / e / i / o
+const TONES = ['', '\u0301', '\u0300', '\u0302'];
+
+// Reads full-name syllables (CV) and nickname syllables (CV + tone + C) alike,
+// expanding each closed syllable back into the two it came from
+function parseWord(word) {
+  const w = word.normalize('NFD').toLowerCase().replace(/[^a-z\u0300-\u0302]/g, '');
+  const isCons = ch => CONS.includes(ch), isVow = ch => VOW.includes(ch);
   const out = [];
-  for (let i = 0; i < w.length; i += 2) {
+  let i = 0;
+  while (i < w.length) {
     const c = CONS.indexOf(w[i]), v = VOW.indexOf(w[i + 1]);
-    if (c < 0 || v < 0) throw new Error(`"${w.slice(i, i + 2)}" isn't a valid syllable: use one of ${CONS.join(' ')} then one of ${VOW.join(' ')}.`);
-    out.push([c, v]);
+    if (c < 0 || v < 0) throw new Error(`"${word}" doesn't split into syllables: each one is a consonant (${CONS.join(' ')}) then a vowel (${VOW.join(' ')}).`);
+    i += 2;
+    let tone = TONES.indexOf(w[i]);
+    if (tone > 0) i++; else tone = 0;
+    if (isCons(w[i]) && !isVow(w[i + 1])) {
+      out.push([c, v], [CONS.indexOf(w[i]), tone]);
+      i++;
+    } else if (tone > 0) {
+      throw new Error(`"${word}": a tone mark needs a closing consonant after its vowel.`);
+    } else {
+      out.push([c, v]);
+    }
   }
   return out;
 }
@@ -194,6 +228,77 @@ function word(sy, base) {
 }
 const PARTS = ['individual', 'generation', 'family'];
 const nameHTML = (e, base) => PARTS.map(k => word(e[k], base && base[k])).join(' ');
+
+// Pair up syllables; the second of each pair keeps only its consonant and its vowel becomes a tone
+function nickWord(sy) {
+  let out = '';
+  for (let i = 0; i < sy.length; i += 2) {
+    const [c, v] = sy[i];
+    out += i + 1 < sy.length ? CONS[c] + VOW[v] + TONES[sy[i + 1][1]] + CONS[sy[i + 1][0]] : CONS[c] + VOW[v];
+  }
+  return (out[0].toUpperCase() + out.slice(1)).normalize('NFC');
+}
+const nickname = e => PARTS.map(k => nickWord(e[k])).join(' ');
+
+// ---------- Pronunciation ----------
+// Nickname syllables as { c, v, coda, tone }; open syllables have no coda or tone
+function nickSyllables(sy) {
+  const out = [];
+  for (let i = 0; i < sy.length; i += 2) {
+    const [c, v] = sy[i];
+    out.push(i + 1 < sy.length ? { c, v, coda: sy[i + 1][0], tone: sy[i + 1][1] } : { c, v });
+  }
+  return out;
+}
+// Every sound is already an IPA symbol; tones use Chao tone letters
+const IPA_TONES = ['˧', '˧˥', '˥˩', '˧˥˩'];
+const ipaFull = e => '/' + PARTS.map(k => 'ˈ' + e[k].map(syl).join('.')).join(' ') + '/';
+const ipaNick = e => '/' + PARTS.map(k => 'ˈ' + nickSyllables(e[k]).map(s =>
+  CONS[s.c] + VOW[s.v] + (s.coda === undefined ? '' : CONS[s.coda] + IPA_TONES[s.tone])).join('.')).join(' ') + '/';
+
+// Browser voices read spelling by their own language's rules. Spanish and Italian
+// spell these sounds the way we do; otherwise fall back to an English respelling.
+const PHONETIC_LANGS = ['es', 'it', 'pt', 'id', 'fi'];
+const EN_VOWELS = ['ah', 'eh', 'ee', 'oh'];
+// Nickname tones as rough pitch shifts, one syllable at a time
+const TONE_PITCH = [1, 1.45, 0.65, 1.2];
+
+function pickVoice() {
+  const voices = speechSynthesis.getVoices();
+  for (const lang of PHONETIC_LANGS) {
+    const v = voices.find(v => v.lang.toLowerCase().startsWith(lang));
+    if (v) return { voice: v, phonetic: true };
+  }
+  return { voice: voices.find(v => v.default) || voices[0] || null, phonetic: false };
+}
+function sayText(s, phonetic) {
+  const v = phonetic ? VOW[s.v] : EN_VOWELS[s.v];
+  return CONS[s.c] + v + (s.coda === undefined ? '' : CONS[s.coda]);
+}
+function speak(e, mode) {
+  speechSynthesis.cancel();
+  const { voice, phonetic } = pickVoice();
+  const utter = (text, pitch = 1) => {
+    const u = new SpeechSynthesisUtterance(text);
+    if (voice) { u.voice = voice; u.lang = voice.lang; }
+    u.pitch = pitch;
+    u.rate = 0.85;
+    speechSynthesis.speak(u);
+  };
+  if (mode === 'full') {
+    utter(PARTS.map(k => e[k].map(([c, v]) => sayText({ c, v }, phonetic)).join(phonetic ? '' : '-')).join(', '));
+  } else {
+    PARTS.forEach(k => nickSyllables(e[k]).forEach(s => utter(sayText(s, phonetic), s.coda === undefined ? 1 : TONE_PITCH[s.tone])));
+  }
+}
+const canSpeak = 'speechSynthesis' in window;
+const sayBtn = (name, mode) => canSpeak
+  ? `<button class="outline secondary say" data-say="${mode}" data-name="${name}" title="Say it" aria-label="Say ${name}">🔊</button>` : '';
+document.addEventListener('click', ev => {
+  const b = ev.target.closest('[data-say]');
+  if (b) speak(encode(decode(b.dataset.name)), b.dataset.say);
+});
+if (canSpeak) speechSynthesis.getVoices();   // starts voice loading in some browsers
 
 // Grid squares as [west, south, east, north]
 function cellBox(la, lo, latCells, lonCells) {
@@ -328,8 +433,12 @@ function renderEncode() {
       `<div><span class="k">${label}:</span> ${nameHTML(encode(v), e)}</div>`
     ).join('');
     const ind = e.individual.map(syl);
+    const nick = nickname(e);
     res.innerHTML = `
-      <div class="name">${plain}</div>
+      <div class="name">${plain}${sayBtn(plain, 'full')}</div>
+      <div class="ipa">${ipaFull(e)}</div>
+      <div class="nick">or <b>${nick}</b> for short${sayBtn(nick, 'nick')}</div>
+      <div class="ipa">${ipaNick(e)}</div>
       <div class="parts">
         <div class="part"><b>${ind[0]}</b>colour + chronotype</div>
         <div class="part"><b>${ind[1]}</b>alignment + spice</div>
@@ -338,12 +447,17 @@ function renderEncode() {
         <div class="part"><b>${e.family.map(syl).join('-')}</b>family area</div>
       </div>
       <div class="neigh">${rows}</div>
-      <button class="outline" id="toRead">Read this name ↓</button>`;
-    $('toRead').onclick = () => {
-      $('nameIn').value = plain;
+      <div role="group">
+        <button class="outline" id="toRead">Read this name ↓</button>
+        <button class="outline secondary" id="toReadNick">Read the nickname ↓</button>
+      </div>`;
+    const sendToReader = text => () => {
+      $('nameIn').value = text;
       renderDecode();
       $('nameIn').scrollIntoView({ behavior: 'smooth', block: 'center' });
     };
+    $('toRead').onclick = sendToReader(plain);
+    $('toReadNick').onclick = sendToReader(nick);
   } catch (err) {
     showError(res, err.message);
   }
@@ -356,7 +470,11 @@ function renderDecode() {
     const r = decode($('nameIn').value);
     const lat = (r.la + 0.5) / LAT_CELLS * 180 - 90;
     const lon = (r.lo + 0.5) / LON_CELLS * 360 - 180;
-    out.innerHTML = Object.keys(FIELDS).map(id =>
+    const e = encode(r);
+    const full = nameHTML(e), nick = nickname(e);
+    out.innerHTML = `
+      <p><b>Full name:</b> ${full}${sayBtn(full, 'full')}<br><span class="ipa">${ipaFull(e)}</span></p>
+      <p><b>Nickname:</b> ${nick}${sayBtn(nick, 'nick')}<br><span class="ipa">${ipaNick(e)}</span></p>` + Object.keys(FIELDS).map(id =>
       `<p><b>${FIELDS[id].label}:</b> ${FIELDS[id].values[r[id]]}</p>`).join('') + `
       <p><b>Born:</b> ${r.year}</p>
       <p><b>Birthplace:</b> around ${lat.toFixed(2)}, ${lon.toFixed(2)} (to within a few miles)</p>`;
