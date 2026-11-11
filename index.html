@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Birth Name Encoder</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<style>
+  .name { font-size:2rem; font-weight:700; margin:1rem 0 .75rem; word-break:break-word; }
+  .parts { display:flex; flex-wrap:wrap; gap:.5rem; }
+  .part { background:var(--pico-code-background-color); border-radius:var(--pico-border-radius); padding:.4rem .7rem; font-size:.8rem; color:var(--pico-muted-color); }
+  .part b { display:block; color:var(--pico-color); font-size:1rem; }
+  .neigh { margin:1rem 0; }
+  .neigh .k { display:inline-block; min-width:12rem; color:var(--pico-muted-color); }
+  .err { color:var(--pico-del-color); }
+  td small { color:var(--pico-muted-color); }
+  .map { height:320px; border-radius:var(--pico-border-radius); overflow:hidden; margin-bottom:.5rem; }
+  .map-hint { display:block; color:var(--pico-muted-color); margin-bottom:1rem; }
+</style>
+</head>
+<body>
+<main class="container">
+  <hgroup>
+    <h1>Birth Name Encoder</h1>
+    <p>Every name encodes sex, favourite colour, birth year and birthplace. Similar people get similar names.</p>
+  </hgroup>
+
+  <article>
+    <h2>Make a name</h2>
+    <div class="grid">
+      <label>Sex
+        <select id="sex">
+          <option value="0">Unspecified</option>
+          <option value="1">Female</option>
+          <option value="2">Male</option>
+          <option value="3">Other</option>
+        </select>
+      </label>
+      <label>Favourite colour
+        <select id="colour">
+          <option value="0">Red</option>
+          <option value="1">Orange</option>
+          <option value="2">Yellow</option>
+          <option value="3">Green</option>
+          <option value="4">Teal</option>
+          <option value="5">Blue</option>
+          <option value="6">Purple</option>
+          <option value="7">Pink</option>
+        </select>
+      </label>
+      <label>Birth year
+        <input type="number" id="year" min="1930" step="1">
+      </label>
+    </div>
+    <div id="pickMap" class="map"></div>
+    <small class="map-hint">Click the map or drag the pin to set the birthplace.</small>
+    <div class="grid">
+      <label>Birthplace latitude
+        <input type="number" id="lat" step="any">
+      </label>
+      <label>Birthplace longitude
+        <input type="number" id="lon" step="any">
+      </label>
+    </div>
+    <button id="geo">Use my current location</button>
+    <div id="result"></div>
+  </article>
+
+  <article>
+    <h2>Read a name</h2>
+    <label>Name
+      <input type="text" id="nameIn" autocomplete="off" spellcheck="false">
+    </label>
+    <div id="decoded"></div>
+    <div id="showMap" class="map"></div>
+  </article>
+
+  <article>
+    <h2>Syllables</h2>
+    <div id="table"></div>
+    <p><small>Each syllable stands for a number from 0 to 31. Neighbouring numbers differ by one sound, and each part of the name counts in reflected (Gray) order, so neighbouring values change only one syllable. Colours run round the colour wheel, so similar colours get similar first syllables.</small></p>
+  </article>
+</main>
+
+<script>
+const CONS = ['p','t','k','s','m','n','l','w'];
+const VOW = ['a','e','i','o'];
+const SEXES = ['Unspecified','Female','Male','Other'];
+const COLOURS = ['Red','Orange','Yellow','Green','Teal','Blue','Purple','Pink'];
+const EPOCH_YEAR = 1930;
+const MAX_YEAR = new Date().getFullYear();
+const MAP_STYLE = 'https://tiles.openfreemap.org/styles/liberty';
+const $ = id => document.getElementById(id);
+
+// Snake-ordered syllable table: even rows a-e-i-o, odd rows o-i-e-a
+function syl(n) {
+  const c = n >> 2, r = n & 3;
+  return CONS[c] + (c % 2 === 0 ? VOW[r] : VOW[3 - r]);
+}
+const SYL_TO_VAL = {};
+for (let n = 0; n < 32; n++) SYL_TO_VAL[syl(n)] = n;
+
+// Reflected base-32 Gray code: a digit is reversed when the digit before it is odd
+function toGray(d, startOdd) {
+  return d.map((x, i) => {
+    const odd = i === 0 ? startOdd : d[i - 1] % 2 === 1;
+    return odd ? 31 - x : x;
+  });
+}
+function fromGray(g, startOdd) {
+  const d = [];
+  g.forEach((x, i) => {
+    const odd = i === 0 ? startOdd : d[i - 1] % 2 === 1;
+    d.push(odd ? 31 - x : x);
+  });
+  return d;
+}
+const digits2 = n => [(n >> 5) & 31, n & 31];
+const fromDigits2 = d => d[0] * 32 + d[1];
+const digits3 = n => [(n >> 10) & 31, (n >> 5) & 31, n & 31];
+const fromDigits3 = d => d[0] * 1024 + d[1] * 32 + d[2];
+
+// 15 bits each for latitude and longitude
+const latIndex = lat => Math.min(32767, Math.max(0, Math.floor((lat + 90) / 180 * 32768)));
+function lonIndex(lon) {
+  const x = ((lon + 180) % 360 + 360) % 360;
+  return Math.floor(x / 360 * 32768) % 32768;
+}
+
+function encode(sex, colour, year, la, lo) {
+  return {
+    first: [sex * 8 + colour, ...toGray(digits2(year - EPOCH_YEAR), false)],
+    middle: toGray(digits3(lo), false),     // longitude
+    surname: toGray(digits3(la), false)     // latitude
+  };
+}
+
+function word(vals, base) {
+  return vals.map((v, i) => {
+    let t = syl(v);
+    if (i === 0) t = t[0].toUpperCase() + t[1];
+    return base && base[i] !== v ? `<mark>${t}</mark>` : t;
+  }).join('');
+}
+function nameHTML(e, base) {
+  return ['first', 'middle', 'surname'].map(k => word(e[k], base && base[k])).join(' ');
+}
+
+function parseWord(w) {
+  w = w.toLowerCase().replace(/[^a-z]/g, '');
+  if (w.length % 2) throw new Error(`"${w}" has an odd number of letters; every syllable is two letters.`);
+  const out = [];
+  for (let i = 0; i < w.length; i += 2) {
+    const s = w.slice(i, i + 2);
+    if (!(s in SYL_TO_VAL)) throw new Error(`"${s}" isn't one of the 32 syllables.`);
+    out.push(SYL_TO_VAL[s]);
+  }
+  return out;
+}
+
+function decode(str) {
+  const words = str.trim().split(/\s+/);
+  if (words.length !== 3) throw new Error('A name has three parts: first name, middle name and surname.');
+  const [f, m, s] = words.map(parseWord);
+  if (f.length !== 3 || m.length !== 3 || s.length !== 3)
+    throw new Error('Expected 3 syllables in each part of the name.');
+  return {
+    sex: f[0] >> 3,
+    colour: f[0] & 7,
+    year: EPOCH_YEAR + fromDigits2(fromGray(f.slice(1), false)),
+    lo: fromDigits3(fromGray(m, false)),
+    la: fromDigits3(fromGray(s, false))
+  };
+}
+
+function showError(el, msg) {
+  el.innerHTML = '';
+  const p = document.createElement('p');
+  p.className = 'err';
+  p.textContent = msg;
+  el.appendChild(p);
+}
+
+function readInputs() {
+  const sex = +$('sex').value, colour = +$('colour').value;
+  const year = +$('year').value;
+  if (!Number.isInteger(year) || year < EPOCH_YEAR || year > MAX_YEAR)
+    throw new Error(`Birth year must be between ${EPOCH_YEAR} and ${MAX_YEAR}.`);
+  const lat = parseFloat($('lat').value), lon = parseFloat($('lon').value);
+  if (!isFinite(lat) || lat < -90 || lat > 90) throw new Error('Latitude must be between -90 and 90.');
+  if (!isFinite(lon)) throw new Error('Enter a longitude.');
+  return { sex, colour, year, la: latIndex(lat), lo: lonIndex(lon), lat };
+}
+
+// ---------- Random starting values ----------
+// Cities to scatter random birthplaces around, so the pin lands on land
+const CITIES = [
+  [51.51, -0.13], [48.86, 2.35], [52.52, 13.40], [40.42, -3.70], [41.90, 12.50],
+  [59.33, 18.07], [40.71, -74.01], [34.05, -118.24], [41.88, -87.63], [43.65, -79.38],
+  [19.43, -99.13], [-23.55, -46.63], [-34.60, -58.38], [6.52, 3.38], [-1.29, 36.82],
+  [30.04, 31.24], [-33.92, 18.42], [28.61, 77.21], [19.08, 72.88], [35.68, 139.69],
+  [37.57, 126.98], [31.23, 121.47], [1.35, 103.82], [-6.21, 106.85], [-33.87, 151.21],
+  [-36.85, 174.76], [55.76, 37.62], [41.01, 28.98], [25.20, 55.27], [64.15, -21.94]
+];
+const randInt = (lo, hi) => lo + Math.floor(Math.random() * (hi - lo + 1));
+function randomPerson() {
+  const [cLat, cLon] = CITIES[randInt(0, CITIES.length - 1)];
+  return {
+    sex: randInt(0, 3),
+    colour: randInt(0, 7),
+    year: randInt(EPOCH_YEAR, MAX_YEAR),
+    lat: Math.max(-90, Math.min(90, cLat + (Math.random() - 0.5) * 0.4)),
+    lon: cLon + (Math.random() - 0.5) * 0.4
+  };
+}
+const start = randomPerson();
+$('sex').value = start.sex;
+$('colour').value = start.colour;
+$('year').value = start.year;
+$('lat').value = start.lat.toFixed(5);
+$('lon').value = start.lon.toFixed(5);
+
+const sample = randomPerson();
+$('nameIn').value = nameHTML(encode(sample.sex, sample.colour, sample.year, latIndex(sample.lat), lonIndex(sample.lon)));
+
+// ---------- Maps ----------
+const mapOpts = { style: MAP_STYLE, attributionControl: { compact: false } };
+
+const pickMap = new maplibregl.Map({ ...mapOpts, container: 'pickMap', center: [start.lon, start.lat], zoom: 9 });
+const pickMarker = new maplibregl.Marker({ draggable: true }).setLngLat([start.lon, start.lat]).addTo(pickMap);
+
+function setPick(lon, lat, fly) {
+  $('lat').value = lat.toFixed(5);
+  $('lon').value = lon.toFixed(5);
+  pickMarker.setLngLat([lon, lat]);
+  if (fly) pickMap.flyTo({ center: [lon, lat], zoom: Math.max(pickMap.getZoom(), 9) });
+  renderEncode();
+}
+pickMap.on('click', e => { const p = e.lngLat.wrap(); setPick(p.lng, p.lat, false); });
+pickMarker.on('dragend', () => { const p = pickMarker.getLngLat().wrap(); setPick(p.lng, p.lat, false); });
+
+const showMap = new maplibregl.Map({ ...mapOpts, container: 'showMap', center: [sample.lon, sample.lat], zoom: 13 });
+const showMarker = new maplibregl.Marker({ color: '#c4512d' }).setLngLat([sample.lon, sample.lat]).addTo(showMap);
+
+function showPlace(lat, lon) {
+  showMarker.setLngLat([lon, lat]);
+  showMap.flyTo({ center: [lon, lat], zoom: 13 });
+}
+
+// ---------- Rendering ----------
+function renderEncode() {
+  const res = $('result');
+  try {
+    const x = readInputs();
+    const e = encode(x.sex, x.colour, x.year, x.la, x.lo);
+    const plain = nameHTML(e);
+    const eastM = Math.round(1221.6 * Math.cos(x.lat * Math.PI / 180));
+    const variants = [
+      ['Born a year earlier', { ...x, year: x.year - 1 }],
+      ['Born a year later', { ...x, year: x.year + 1 }],
+      ['Likes the next colour along', { ...x, colour: (x.colour + 1) % 8 }],
+      ['Born ~610 m further north', { ...x, la: Math.min(32767, x.la + 1) }],
+      [`Born ~${eastM} m further east`, { ...x, lo: (x.lo + 1) % 32768 }]
+    ].filter(([, v]) => v.year >= EPOCH_YEAR && v.year <= MAX_YEAR);
+    const rows = variants.map(([label, v]) =>
+      `<div><span class="k">${label}:</span> ${nameHTML(encode(v.sex, v.colour, v.year, v.la, v.lo), e)}</div>`
+    ).join('');
+    res.innerHTML = `
+      <div class="name">${plain}</div>
+      <div class="parts">
+        <div class="part"><b>${syl(e.first[0])}</b>sex + colour</div>
+        <div class="part"><b>${e.first.slice(1).map(syl).join('-')}</b>birth year</div>
+        <div class="part"><b>${e.middle.map(syl).join('-')}</b>longitude</div>
+        <div class="part"><b>${e.surname.map(syl).join('-')}</b>latitude</div>
+      </div>
+      <div class="neigh">${rows}</div>
+      <button class="outline" id="toRead">Read this name ↓</button>`;
+    $('toRead').onclick = () => {
+      $('nameIn').value = plain;
+      renderDecode();
+      $('nameIn').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+  } catch (err) {
+    showError(res, err.message);
+  }
+}
+
+function renderDecode() {
+  const out = $('decoded');
+  if (!$('nameIn').value.trim()) { out.innerHTML = ''; return; }
+  try {
+    const r = decode($('nameIn').value);
+    const lat = (r.la + 0.5) / 32768 * 180 - 90;
+    const lon = (r.lo + 0.5) / 32768 * 360 - 180;
+    out.innerHTML = `
+      <p><b>Sex:</b> ${SEXES[r.sex]}</p>
+      <p><b>Favourite colour:</b> ${COLOURS[r.colour]}</p>
+      <p><b>Born:</b> ${r.year}</p>
+      <p><b>Birthplace:</b> ${lat.toFixed(4)}, ${lon.toFixed(4)} (to within about a kilometre)</p>`;
+    showPlace(lat, lon);
+  } catch (err) {
+    showError(out, err.message);
+  }
+}
+
+function renderTable() {
+  let h = '<table>';
+  for (let c = 0; c < 8; c++) {
+    h += `<tr><td class="h">${CONS[c]}</td>`;
+    for (let r = 0; r < 4; r++) {
+      const n = c * 4 + r;
+      h += `<td>${syl(n)} <small>${n}</small></td>`;
+    }
+    h += '</tr>';
+  }
+  $('table').innerHTML = h + '</table>';
+}
+
+// ---------- Wiring ----------
+$('year').max = MAX_YEAR;
+['sex', 'colour', 'year', 'lat', 'lon'].forEach(id => $(id).addEventListener('input', renderEncode));
+['lat', 'lon'].forEach(id => $(id).addEventListener('change', () => {
+  const lat = parseFloat($('lat').value), lon = parseFloat($('lon').value);
+  if (isFinite(lat) && isFinite(lon) && Math.abs(lat) <= 90) {
+    pickMarker.setLngLat([lon, lat]);
+    pickMap.easeTo({ center: [lon, lat] });
+  }
+}));
+$('nameIn').addEventListener('input', renderDecode);
+
+$('geo').onclick = () => {
+  if (!navigator.geolocation) return alert('Location is not available in this browser.');
+  navigator.geolocation.getCurrentPosition(
+    p => setPick(p.coords.longitude, p.coords.latitude, true),
+    () => alert('Could not get your location. You can type coordinates or click the map instead.')
+  );
+};
+
+renderTable();
+renderEncode();
+renderDecode();
+</script>
+</body>
+</html>
