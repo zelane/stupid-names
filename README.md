@@ -19,7 +19,7 @@ then open <http://localhost:8000>.
 | File | What it does |
 |---|---|
 | `index.html`, `style.css` | Markup and styling |
-| `js/codec.js` | The scheme itself: traits, digit layouts, Gray code, encoding a person as syllables and decoding Latin spellings back. No DOM. |
+| `js/codec.js` | The scheme itself: traits, digit layouts, Gray code, a vowel shift by era, encoding a person as syllables and decoding Latin spellings back. No DOM. |
 | `js/scripts.js` | Writing systems: spelling a name in each script, and reading any script back via Latin |
 | `js/speech.js` | IPA transcriptions and the browser's built-in voices |
 | `js/map.js` | The birthplace picker and the family-area map (MapLibre) |

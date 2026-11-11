@@ -85,18 +85,49 @@ function randomBirth() {
   for (const id in FIELDS) traits[id] = randInt(0, FIELDS[id].values.length - 1);
   return { traits, year, lat, lon };
 }
-const start = randomBirth();
-for (const id in FIELDS) $(id).value = start.traits[id];
-$('year').value = start.year;
-$('lat').value = start.lat.toFixed(5);
-$('lon').value = start.lon.toFixed(5);
-
+function fillForm(b) {
+  for (const id in FIELDS) $(id).value = b.traits[id];
+  $('year').value = b.year;
+  $('lat').value = b.lat.toFixed(5);
+  $('lon').value = b.lon.toFixed(5);
+}
 // A sibling: born in the same place a few years apart, with their own traits
-const gap = randInt(1, 6) * (Math.random() < 0.5 ? -1 : 1);
-let sibYear = start.year + gap;
-if (sibYear < EPOCH_YEAR || sibYear > MAX_YEAR) sibYear = start.year - gap;
-const sibling = { ...randomBirth(), lat: start.lat, lon: start.lon, year: sibYear };
-$('nameIn').value = fullName(script, encode(person(sibling)));
+function siblingOf(b) {
+  const gap = randInt(1, 6) * (Math.random() < 0.5 ? -1 : 1);
+  let year = b.year + gap;
+  if (year < EPOCH_YEAR || year > MAX_YEAR) year = b.year - gap;
+  return { ...randomBirth(), lat: b.lat, lon: b.lon, year };
+}
+
+// ---------- Remembered inputs ----------
+// The form and the reader are kept in this browser only, so a refresh keeps them.
+// Anything missing or out of range falls back to a fresh random person.
+const SAVE_KEY = 'inputs';
+function saveInputs() {
+  const fields = {};
+  for (const id of [...Object.keys(FIELDS), 'year', 'lat', 'lon', 'nameIn']) fields[id] = $(id).value;
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(fields)); } catch (e) {}
+}
+function restoreInputs() {
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) {}
+  if (!saved || typeof saved !== 'object') return false;
+  const ok = Object.keys(FIELDS).every(id => Number.isInteger(+saved[id]) && +saved[id] >= 0 && +saved[id] < FIELDS[id].values.length)
+    && [saved.year, saved.lat, saved.lon, saved.nameIn].every(v => typeof v === 'string')
+    && isFinite(parseFloat(saved.lat)) && isFinite(parseFloat(saved.lon));
+  if (!ok) return false;
+  for (const id of [...Object.keys(FIELDS), 'year', 'lat', 'lon', 'nameIn']) $(id).value = saved[id];
+  return true;
+}
+
+let start;
+if (restoreInputs()) {
+  start = { lat: parseFloat($('lat').value), lon: parseFloat($('lon').value) };
+} else {
+  start = randomBirth();
+  fillForm(start);
+  $('nameIn').value = fullName(script, encode(person(siblingOf(start))));
+}
 
 // ---------- Maps ----------
 function setPick(lon, lat, fly) {
@@ -107,7 +138,17 @@ function setPick(lon, lat, fly) {
   renderEncode();
 }
 const picker = pickMap('pickMap', [start.lon, start.lat], (lon, lat) => setPick(lon, lat, false));
-const area = areaMap('showMap', [sibling.lon, sibling.lat]);
+const area = areaMap('showMap', [start.lon, start.lat]);
+
+$('randomise').onclick = () => {
+  const b = randomBirth();
+  fillForm(b);
+  $('nameIn').value = fullName(script, encode(person(siblingOf(b))));
+  picker.pin(b.lon, b.lat);
+  picker.flyTo(b.lon, b.lat);
+  renderEncode();
+  renderDecode();
+};
 
 // ---------- The made name ----------
 function sendToReader(text) {
@@ -155,6 +196,7 @@ function encodeView(birth) {
 }
 
 function renderEncode() {
+  saveInputs();
   let view;
   try { view = encodeView(readBirth()); } catch (err) { view = errorView(err.message); }
   render(view, $('result'));
@@ -175,6 +217,7 @@ function decodedView(r) {
 }
 
 function renderDecode() {
+  saveInputs();
   const text = $('nameIn').value;
   let view = nothing;
   if (text.trim()) {
@@ -195,7 +238,7 @@ function renderGuide() {
   const lower = id => FIELDS[id].label.toLowerCase();
   render(INDIVIDUAL.map(([c, v], i) =>
     html`<tr><td>${i === 0 ? 'Individual' : ''}</td><td>${i + 1}</td><td>${lower(c)}</td><td>${lower(v)}</td></tr>`), $('layoutIndividual'));
-  const sound = (id, i) => IS_CONSONANT[id] ? CONS[i] : VOW[toVowel(id, i)];
+  const sound = (id, i) => IS_CONSONANT[id] ? (CONS[i] === 'r' ? 'l/r' : CONS[i]) : VOW[toVowel(id, i)];
   render(Object.keys(FIELDS).map(id => html`
     <p><small><b>${FIELDS[id].label}:</b> ${FIELDS[id].values.map((v, i) => html`${i ? ' · ' : ''}<i>${sound(id, i)}</i> ${v}`)}</small></p>`),
     $('key'));

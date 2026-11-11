@@ -38,7 +38,7 @@
       </label>
     </div>
     <div class="stack make-output">
-      <div><button id="geo">Use my current location</button></div>
+      <div class="cluster"><button id="geo">Use my current location</button><button id="randomise" class="secondary">New random person</button></div>
       <label class="cluster script-pick">Write names in <select id="script"></select></label>
       <div id="result"></div>
     </div>
@@ -57,7 +57,7 @@
 
   <article>
     <h2>How to read the syllables</h2>
-    <p><small>Every syllable is a consonant and a vowel. The consonant (p t v s m n l w) is a number from 0 to 7 and the vowel (a e i o) is a number from 0 to 3, so each trait owns one sound and changing a trait changes only that sound.</small></p>
+    <p><small>Every syllable is a consonant and a vowel. The consonant (p t v s m n l/r w) is a number from 0 to 7 and the vowel is a number from 0 to 3, so each trait owns one sound and changing a trait changes only that sound. <i>l</i> and <i>r</i> are the same sound, written <i>r</i> between two vowels and <i>l</i> everywhere else, as Korean does with ㄹ: <i>La·pu·re·pe</i> starts with <i>l</i> and keeps its <i>r</i> in the middle. Readers accept either letter anywhere. Generation and family names always write their vowels <i>a e i u</i>; individual names use four of the five vowels <i>a e i o u</i>, depending on when you were born (see the vowel shift below).</small></p>
     <table>
       <thead><tr><th>Part</th><th>Syllable</th><th>Consonant</th><th>Vowel</th></tr></thead>
       <tbody id="layoutIndividual"></tbody>
@@ -69,9 +69,21 @@
       </tbody>
     </table>
     <div class="key" id="key"></div>
+    <h3>Vowel shift</h3>
+    <p><small>Individual names follow the fashion of their era, like a real vowel shift. Each vowel trait's four values are spelled with four vowels in a row from the cycle <i>a e i o u</i>, and every 16 years the window moves one step along it, so all three vowels change, each era leaves out a different vowel, and names come back into fashion every 80 years. The vowels in the key above are for someone born in 1930–45. The generation name isn't shifted, so a reader works out the shift from its birth year first. Changing a trait still changes one sound, but being born across a 16-year boundary changes all three vowels.</small></p>
+    <table>
+      <thead><tr><th>Born</th><th>Values 0 1 2 3 are written</th><th>Never uses</th></tr></thead>
+      <tbody>
+        <tr><td>1930–45, 2010–25</td><td><i>a e i o</i></td><td><i>u</i></td></tr>
+        <tr><td>1946–61, 2026–41</td><td><i>e i o u</i></td><td><i>a</i></td></tr>
+        <tr><td>1962–77, 2042–57</td><td><i>i o u a</i></td><td><i>e</i></td></tr>
+        <tr><td>1978–93</td><td><i>o u a e</i></td><td><i>i</i></td></tr>
+        <tr><td>1994–2009</td><td><i>u a e i</i></td><td><i>o</i></td></tr>
+      </tbody>
+    </table>
     <h3>Nicknames</h3>
-    <p><small>For anyone in a hurry, every name has a nickname that keeps all the same information in fewer syllables. Within each part of the name, syllables pair up: the second one loses its vowel, its consonant closes the first syllable, and the lost vowel survives as a tone on the vowel that's left. <i>No·vi·wa Sa·no La·po·le·pe</i> becomes <i>Nòv·wa Sân Lâp·lép</i>. A <i>w</i> that ends a syllable is written <i>u</i>, so <i>wa·we</i> shortens to <i>Wáu</i>. Full names, nicknames and mixtures of the two all read the same.</small></p>
-    <p><small>Every letter is pronounced as its IPA symbol: <i>p t v s m n l w</i> as in English, <i>a e i o</i> as in Spanish or Italian. The 🔊 buttons use your browser's built-in voices, preferring a Spanish or Italian one because they spell these sounds the same way. Browser voices can't bend pitch within a syllable, so nickname tones are only approximated, one syllable at a time.</small></p>
+    <p><small>For anyone in a hurry, every name has a nickname that keeps all the same information in fewer syllables. Within each part of the name, syllables pair up: the second one loses its vowel, its consonant closes the first syllable, and the lost vowel survives as a tone on the vowel that's left. <i>Nu·vi·wa Sa·nu La·pu·re·pe</i> becomes <i>Nùv·wa Sǎn Lǎp·lép</i>; the <i>r</i> no longer sits between vowels, so it's written <i>l</i>. Full names, nicknames and mixtures of the two all read the same.</small></p>
+    <p><small>Every letter is pronounced as its IPA symbol: <i>p t v s m n l w</i> as in English, <i>r</i> tapped as in Spanish or Italian, and <i>a e i o u</i> as in Spanish or Italian. The 🔊 buttons use your browser's built-in voices, preferring a Spanish or Italian one because they spell these sounds the same way. Browser voices can't bend pitch within a syllable, so nickname tones are only approximated, one syllable at a time.</small></p>
     <table>
       <thead><tr><th>Lost vowel</th><th>Tone</th><th>Written</th></tr></thead>
       <tbody>
@@ -79,9 +91,10 @@
         <tr><td>e</td><td>rising</td><td>acute: <i>páv</i></td></tr>
         <tr><td>i</td><td>falling</td><td>grave: <i>pàv</i></td></tr>
         <tr><td>o</td><td>rise then fall</td><td>circumflex: <i>pâv</i></td></tr>
+        <tr><td>u</td><td>dipping</td><td>caron: <i>pǎv</i></td></tr>
       </tbody>
     </table>
-    <p><small>Year and location count in reflected (Gray) order, so being born a year later, or one grid square over, changes a single sound. Family areas are about 12 miles north to south and 24 miles east to west at the equator, narrowing towards the poles (about 15 miles at London's latitude). The generation name narrows that to a square about 6 miles tall.</small></p>
+    <p><small>Year and location count in reflected (Gray) order, so being born a year later, or one grid square over, changes a single sound (apart from the vowel shift every 16 years). Family areas are about 12 miles north to south and 24 miles east to west at the equator, narrowing towards the poles (about 15 miles at London's latitude). The generation name narrows that to a square about 6 miles tall.</small></p>
   </article>
 </main>
 
