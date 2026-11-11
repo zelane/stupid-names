@@ -1,0 +1,67 @@
+/* Layout follows Every Layout: a few primitives own spacing and arrangement, and components
+   only tune them through custom properties. Pico CSS still styles typography and forms. */
+
+/* ---------- Axioms ---------- */
+:root {
+  /* Modular scale, ratio 1.5 */
+  --s-3: 0.296rem; --s-2: 0.444rem; --s-1: 0.667rem; --s0: 1rem; --s1: 1.5rem; --s2: 2.25rem;
+  --measure: 65ch;
+  --pico-font-family: system-ui, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", Helvetica, Arial,
+    "Noto Sans Georgian", "Noto Sans Armenian", "Noto Sans Ethiopic", "Noto Sans Devanagari", "Noto Sans KR", sans-serif;
+  /* Names, and IPA, are set in a serif that covers every script on the page */
+  --name-font: "Charis SIL", "Noto Serif", "Noto Serif Georgian", "Noto Serif Armenian", "Noto Serif Ethiopic",
+    "Noto Serif Devanagari", "Noto Serif KR", serif;
+}
+/* Lines of text never run longer than the measure; containers, tables and controls are uncapped */
+p, h1, h2, h3, .hint { max-inline-size: var(--measure); }
+
+/* ---------- Primitives ---------- */
+/* Stack: space between siblings, set by the parent */
+.stack { display: flex; flex-direction: column; justify-content: flex-start; }
+.stack > * { margin-block: 0; }
+.stack > * + * { margin-block-start: var(--space, var(--s1)); }
+
+/* Cluster: a group that wraps as a unit, with even gaps both ways */
+.cluster { display: flex; flex-wrap: wrap; gap: var(--space, var(--s0)); justify-content: flex-start; align-items: center; }
+
+/* Sidebar: first child keeps --sidebar-width, the last takes the rest, and they stack when it can't */
+.with-sidebar { display: flex; flex-wrap: wrap; gap: var(--space, var(--s0)); }
+.with-sidebar > :first-child { flex-basis: var(--sidebar-width, 20rem); flex-grow: 1; }
+.with-sidebar > :last-child { flex-basis: 0; flex-grow: 999; min-inline-size: var(--content-min, 50%); }
+
+/* Switcher: equal children in a row, all stacking at once below --threshold of container width */
+.switcher { display: flex; flex-wrap: wrap; gap: var(--space, var(--s0)); }
+.switcher > * { flex-grow: 1; flex-basis: calc((var(--threshold, 30rem) - 100%) * 999); }
+
+/* ---------- Components ---------- */
+/* Form rows: Pico's control margins already space stacked fields, so only columns need a gap */
+.fields { --threshold: 36rem; --space: var(--s0); row-gap: 0; }
+
+.make-output { --space: var(--s1); }
+.script-pick { --space: var(--s-1); }
+.script-pick select { inline-size: auto; margin: 0; }
+
+/* The made name: name groups, chips, neighbours and buttons, each a tight group inside */
+.result { --space: var(--s1); }
+.name-group { --space: var(--s-3); }
+.say-line { --space: var(--s-2); }
+.parts { --space: var(--s-2); }
+.neigh { --space: var(--s-2); }
+.neigh > .with-sidebar { --space: 0 var(--s-1); --sidebar-width: 14rem; --content-min: 50%; }
+.decoded { --space: var(--s-1); }
+
+.name, .name-text, .nick b, .part b, #nameIn { font-family: var(--name-font); }
+.name { font-size: clamp(1.6rem, 1rem + 3vw, 2rem); font-weight: 700; word-break: break-word; }
+.nick { font-size: 1.2rem; color: var(--pico-muted-color); }
+.nick b { color: var(--pico-color); }
+.ipa { color: var(--pico-muted-color); font-family: var(--name-font); font-size: 1.1rem; }
+.part { background: var(--pico-code-background-color); border-radius: var(--pico-border-radius); padding: var(--s-2) var(--s-1); font-size: .8rem; color: var(--pico-muted-color); }
+.part b { display: block; color: var(--pico-color); font-size: 1rem; }
+.neigh .k { color: var(--pico-muted-color); }
+.err { color: var(--pico-del-color); }
+button.say { inline-size: auto; padding: .15rem .55rem; margin: 0; font-size: .8rem; }
+
+/* Maps size from their width, within limits, instead of a fixed height */
+.map { inline-size: 100%; aspect-ratio: 4 / 3; max-block-size: 22rem; border-radius: var(--pico-border-radius); overflow: hidden; margin-block-end: var(--s-2); }
+.hint { display: block; color: var(--pico-muted-color); margin-block-end: var(--s0); }
+.key p { margin-block-end: var(--s-2); }
